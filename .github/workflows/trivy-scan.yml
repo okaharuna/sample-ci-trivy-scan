@@ -6,9 +6,6 @@ on:
       - main
       - develop
   pull_request:
-    branches:
-      - main
-      - develop
   # 日次スキャンの例
   # schedule:
     # Run daily at 00:00 UTC
