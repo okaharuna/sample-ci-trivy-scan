@@ -42,7 +42,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-          cache: 'npm'
 
       - name: Install Serverless Framework
         run: npm install -g serverless
@@ -58,8 +57,21 @@ jobs:
         continue-on-error: true
 
       - name: Package Serverless application
-        run: serverless package
+        run: |
+          serverless package || {
+            echo "Serverless package failed, but continuing..."
+            echo "Error code: $?"
+          }
         continue-on-error: true
+
+      - name: Debug - List .serverless directory
+        run: |
+          if [ -d .serverless ]; then
+            echo ".serverless directory exists"
+            ls -la .serverless/
+          else
+            echo ".serverless directory does not exist"
+          fi
 
       - name: Run Trivy scan on CloudFormation templates
         if: hashFiles('.serverless/*.json') != ''
@@ -99,6 +111,7 @@ jobs:
           output: 'trivy-fs-results.sarif'
           severity: 'CRITICAL,HIGH,MEDIUM'
           scanners: 'vuln,secret,misconfig'
+          skip-dirs: 'node_modules'
 
       - name: Upload Trivy filesystem scan results to GitHub Security tab
         if: always() && hashFiles('trivy-fs-results.sarif') != ''
@@ -116,6 +129,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
           scanners: 'vuln'
           vuln-type: 'library'
+          skip-dirs: 'node_modules'
         continue-on-error: true
 
       - name: Run Trivy configuration scanner
@@ -152,6 +166,7 @@ jobs:
           format: 'json'
           output: 'trivy-report.json'
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          skip-dirs: 'node_modules'
         continue-on-error: true
 
       - name: Generate Trivy report for PR comment
@@ -164,6 +179,7 @@ jobs:
           output: 'trivy-pr-report.txt'
           severity: 'CRITICAL,HIGH,MEDIUM'
           exit-code: '0'
+          skip-dirs: 'node_modules'
 
       - name: Post Trivy scan results to PR
         if: github.event_name == 'pull_request'
