@@ -38,6 +38,58 @@ jobs:
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+
+      - name: Create package.json if not exists
+        run: |
+          if [ ! -f package.json ]; then
+            echo '{"name": "sample-python-service", "version": "1.0.0"}' > package.json
+          fi
+
+      - name: Install serverless-python-requirements plugin
+        run: npm install --save-dev serverless-python-requirements
+        continue-on-error: true
+
+      - name: Package Serverless application
+        run: serverless package
+        continue-on-error: true
+
+      - name: Run Trivy scan on CloudFormation templates
+        if: hashFiles('.serverless/*.json') != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.serverless/'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+        continue-on-error: true
+
+      - name: Run Trivy scan on CloudFormation (SARIF)
+        if: hashFiles('.serverless/*.json') != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.serverless/'
+          format: 'sarif'
+          output: 'trivy-cloudformation-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          exit-code: '0'
+
+      - name: Upload CloudFormation scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-cloudformation-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-cloudformation-results.sarif'
+          category: 'trivy-cloudformation'
+
       - name: Run Trivy vulnerability scanner in filesystem mode
         uses: aquasecurity/trivy-action@master
         with:
@@ -49,8 +101,8 @@ jobs:
           scanners: 'vuln,secret,misconfig'
 
       - name: Upload Trivy filesystem scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-fs-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with:
           sarif_file: 'trivy-fs-results.sarif'
           category: 'trivy-filesystem'
@@ -77,8 +129,8 @@ jobs:
           exit-code: '0'
 
       - name: Upload Trivy config scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-config-results.sarif') != ''
         uses: github/codeql-action/upload-sarif@v3
-        if: always()
         with:
           sarif_file: 'trivy-config-results.sarif'
           category: 'trivy-config'
@@ -178,6 +230,15 @@ jobs:
           path: |
             trivy-fs-results.sarif
             trivy-config-results.sarif
+            trivy-cloudformation-results.sarif
             trivy-report.json
             trivy-pr-report.txt
+          retention-days: 30
+
+      - name: Upload CloudFormation templates as artifact
+        if: hashFiles('.serverless/*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: serverless-cloudformation
+          path: .serverless/
           retention-days: 30

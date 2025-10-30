@@ -6,9 +6,3 @@ requests>=2.31.0,<3.0.0
 
 # JSON web token
 PyJWT>=2.8.0,<3.0.0
-
-# Flask (intentionally using older version with known vulnerabilities for testing)
-Flask==2.2.0
-
-# Jinja2 (older version with known vulnerabilities)
-Jinja2==3.0.0
