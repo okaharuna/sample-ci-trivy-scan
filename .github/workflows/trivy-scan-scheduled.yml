@@ -2,6 +2,8 @@ name: Trivy Security Scan - Scheduled
 
 on:
   push:
+    branches:
+      - main
   schedule:
     # 毎週月曜10:00 (01:00 UTC)
     - cron: '0 1 * * 1'
