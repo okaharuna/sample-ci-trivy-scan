@@ -1,0 +1,134 @@
+name: Trivy Security Scan - Scheduled
+
+on:
+  push:
+  schedule:
+    # 毎週月曜10:00 (01:00 UTC)
+    - cron: '0 1 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+  actions: read
+
+jobs:
+  trivy-scan-full:
+    name: Trivy Full Security Scan
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Serverless Framework
+        run: npm install -g serverless
+
+      - name: Create package.json if not exists
+        run: |
+          if [ ! -f package.json ]; then
+            echo '{"name": "sample-python-service", "version": "1.0.0"}' > package.json
+          fi
+
+      - name: Install serverless-python-requirements plugin
+        run: npm install --save-dev serverless-python-requirements
+        continue-on-error: true
+
+      - name: Package Serverless application
+        run: serverless package
+        env:
+          AWS_ACCESS_KEY_ID: dummy
+          AWS_SECRET_ACCESS_KEY: dummy
+        continue-on-error: true
+
+      - name: Run Trivy scan on CloudFormation templates (table)
+        if: hashFiles('.serverless/*.json') != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.serverless/'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          exit-code: '0'
+        continue-on-error: true
+
+      - name: Run Trivy scan on CloudFormation (SARIF)
+        if: hashFiles('.serverless/*.json') != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.serverless/'
+          format: 'sarif'
+          output: 'trivy-cloudformation-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          exit-code: '0'
+
+      - name: Upload CloudFormation scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-cloudformation-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-cloudformation-results.sarif'
+          category: 'trivy-cloudformation'
+
+      - name: Run Trivy vulnerability scanner in filesystem mode (SARIF)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'sarif'
+          output: 'trivy-fs-results.sarif'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          scanners: 'vuln,secret,misconfig'
+          skip-dirs: 'node_modules'
+
+      - name: Upload Trivy filesystem scan results to GitHub Security tab
+        if: always() && hashFiles('trivy-fs-results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-fs-results.sarif'
+          category: 'trivy-filesystem'
+
+      - name: Generate Trivy report (JSON)
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'fs'
+          scan-ref: '.'
+          format: 'json'
+          output: 'trivy-report.json'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+          skip-dirs: 'node_modules'
+        continue-on-error: true
+
+      - name: Upload Trivy scan reports as artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trivy-scan-report
+          path: |
+            trivy-*.sarif
+            trivy-report.json
+          retention-days: 30
+
+      - name: Upload CloudFormation templates as artifact
+        if: hashFiles('.serverless/*.json') != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: serverless-cloudformation
+          path: .serverless/
+          retention-days: 30
