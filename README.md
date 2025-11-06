@@ -266,18 +266,7 @@ skip-dirs: 'node_modules,vendor,.venv'
 ├── requirements.txt                    # Python依存関係
 ├── serverless.yml                      # Serverless Framework設定
 ├── package.json                        # Node.js依存関係（ワークフロー内で自動生成）
-├── README.md                           # このファイル
-├── WORKFLOW_DESIGN.md                  # ワークフロー設計ドキュメント
-├── WORKFLOW_EXPLANATION.md             # ワークフロー詳細解説
-└── SCAN_TYPES.md                       # スキャンタイプ解説
-
-# ビルド時に生成されるディレクトリ（.gitignoreで除外）
-├── .serverless/                 # serverless packageで生成（定期スキャンのみ）
-│   ├── cloudformation-template-create-stack.json
-│   ├── cloudformation-template-update-stack.json
-│   └── serverless-state.json
-├── node_modules/                # npm installで生成（定期スキャンのみ）
-└── venv/                        # Python仮想環境
+└── README.md
 ```
 
 ## スキャン結果の例
