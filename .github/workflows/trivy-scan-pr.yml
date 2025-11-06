@@ -17,20 +17,33 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # ========================================
+      # セットアップ: リポジトリとPython環境
+      # ========================================
+
+      # PRのコードをチェックアウト
       - name: Checkout code
         uses: actions/checkout@v4
 
+      # Pythonのセットアップとpipキャッシュの有効化
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
           cache: 'pip'
 
+      # Python依存関係をインストール
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
           if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
 
+      # ========================================
+      # Trivyスキャン: 高速版（PR用）
+      # ========================================
+
+      # CRITICAL/HIGHレベルの脆弱性のみスキャン（高速実行）
+      # テーブル形式でログ出力
       - name: Run Trivy scan for critical vulnerabilities
         uses: aquasecurity/trivy-action@master
         with:
@@ -42,6 +55,8 @@ jobs:
           skip-dirs: 'node_modules'
         continue-on-error: true
 
+      # シークレット（APIキー、パスワードなど）を検出
+      # 検出時はワークフローを失敗させてマージをブロック
       - name: Run Trivy scan for secrets
         uses: aquasecurity/trivy-action@master
         with:
@@ -50,8 +65,14 @@ jobs:
           scanners: 'secret'
           format: 'table'
           skip-dirs: 'node_modules'
-          exit-code: '1'
+          exit-code: '1'  # シークレット検出時は失敗
 
+      # ========================================
+      # PRコメント投稿用レポート生成
+      # ========================================
+
+      # PRコメントに表示するためのレポート生成
+      # CRITICAL/HIGHレベルの脆弱性とシークレットを含む
       - name: Generate Trivy report for PR comment
         uses: aquasecurity/trivy-action@master
         with:
@@ -64,15 +85,23 @@ jobs:
           exit-code: '0'
           skip-dirs: 'node_modules'
 
+      # ========================================
+      # PRコメント投稿
+      # ========================================
+
+      # スキャン結果をPRにコメントとして投稿
+      # 既存のコメントがある場合は更新（重複回避）
       - name: Post Trivy scan results to PR
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
+            // レポートファイルを読み込み
             const triviaReport = fs.existsSync('trivy-pr-report.txt')
               ? fs.readFileSync('trivy-pr-report.txt', 'utf8')
               : 'No critical vulnerabilities or secrets detected.';
 
+            // PRコメント本文を作成
             const commentBody = `## 🔒 Trivy Security Scan Results (PR)
 
             <details>
@@ -93,7 +122,7 @@ jobs:
             <sub>📋 View detailed results in the [Security tab](${{ github.server_url }}/${{ github.repository }}/security/code-scanning)</sub>
             `;
 
-            // Find existing comment
+            // 既存のBotコメントを検索
             const { data: comments } = await github.rest.issues.listComments({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -105,8 +134,9 @@ jobs:
               comment.body.includes('🔒 Trivy Security Scan Results (PR)')
             );
 
-            // Update or create comment
+            // コメントを更新または新規作成
             if (botComment) {
+              // 既存コメントを更新
               await github.rest.issues.updateComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
@@ -114,6 +144,7 @@ jobs:
                 body: commentBody
               });
             } else {
+              // 新規コメントを作成
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
