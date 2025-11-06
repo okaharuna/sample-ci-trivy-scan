@@ -105,6 +105,7 @@ jobs:
           category: 'trivy-filesystem'
 
       - name: Generate Trivy report (JSON)
+        id: trivy-json
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'fs'
@@ -114,6 +115,78 @@ jobs:
           severity: 'CRITICAL,HIGH,MEDIUM,LOW'
           skip-dirs: 'node_modules'
         continue-on-error: true
+
+      - name: Generate CloudFormation report (JSON)
+        id: trivy-cfn-json
+        if: hashFiles('.serverless/*.json') != ''
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'config'
+          scan-ref: '.serverless/'
+          format: 'json'
+          output: 'trivy-cloudformation.json'
+          severity: 'CRITICAL,HIGH,MEDIUM,LOW'
+        continue-on-error: true
+
+      - name: Notify to Chatwork
+        if: always()
+        env:
+          CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+          CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
+        run: |
+          # JSONレポートから脆弱性をカウント
+          if [ -f trivy-report.json ]; then
+            CRITICAL=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' trivy-report.json 2>/dev/null || echo 0)
+            HIGH=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")] | length' trivy-report.json 2>/dev/null || echo 0)
+            MEDIUM=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="MEDIUM")] | length' trivy-report.json 2>/dev/null || echo 0)
+            LOW=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="LOW")] | length' trivy-report.json 2>/dev/null || echo 0)
+          else
+            CRITICAL=0; HIGH=0; MEDIUM=0; LOW=0
+          fi
+
+          # CloudFormationの脆弱性をカウント
+          if [ -f trivy-cloudformation.json ]; then
+            CFN_CRITICAL=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity=="CRITICAL")] | length' trivy-cloudformation.json 2>/dev/null || echo 0)
+            CFN_HIGH=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity=="HIGH")] | length' trivy-cloudformation.json 2>/dev/null || echo 0)
+            CFN_MEDIUM=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity=="MEDIUM")] | length' trivy-cloudformation.json 2>/dev/null || echo 0)
+            CFN_LOW=$(jq '[.Results[]?.Misconfigurations[]? | select(.Severity=="LOW")] | length' trivy-cloudformation.json 2>/dev/null || echo 0)
+          else
+            CFN_CRITICAL=0; CFN_HIGH=0; CFN_MEDIUM=0; CFN_LOW=0
+          fi
+
+          # 合計
+          TOTAL_CRITICAL=$((CRITICAL + CFN_CRITICAL))
+          TOTAL_HIGH=$((HIGH + CFN_HIGH))
+          TOTAL_MEDIUM=$((MEDIUM + CFN_MEDIUM))
+          TOTAL_LOW=$((LOW + CFN_LOW))
+          TOTAL=$((TOTAL_CRITICAL + TOTAL_HIGH + TOTAL_MEDIUM + TOTAL_LOW))
+
+          # Chatworkメッセージを作成
+          MESSAGE="[info][title]🔒 Trivy Security Scan 結果[/title]"
+          MESSAGE="${MESSAGE}リポジトリ: ${{ github.repository }}"
+          MESSAGE="${MESSAGE}\nブランチ: ${{ github.ref_name }}"
+          MESSAGE="${MESSAGE}\n実行: #${{ github.run_number }}"
+          MESSAGE="${MESSAGE}\n\n【検出結果】"
+          MESSAGE="${MESSAGE}\n[hr]"
+          MESSAGE="${MESSAGE}\n🔴 CRITICAL: ${TOTAL_CRITICAL}件"
+          MESSAGE="${MESSAGE}\n🟠 HIGH: ${TOTAL_HIGH}件"
+          MESSAGE="${MESSAGE}\n🟡 MEDIUM: ${TOTAL_MEDIUM}件"
+          MESSAGE="${MESSAGE}\n⚪️ LOW: ${TOTAL_LOW}件"
+          MESSAGE="${MESSAGE}\n[hr]"
+          MESSAGE="${MESSAGE}\n合計: ${TOTAL}件の問題を検出"
+
+          if [ $TOTAL_CRITICAL -gt 0 ] || [ $TOTAL_HIGH -gt 0 ]; then
+            MESSAGE="${MESSAGE}\n\n⚠️ CRITICAL/HIGHレベルの問題があります。確認してください。"
+          fi
+
+          MESSAGE="${MESSAGE}\n\n詳細: ${{ github.server_url }}/${{ github.repository }}/security/code-scanning"
+          MESSAGE="${MESSAGE}\nワークフロー: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}[/info]"
+
+          # Chatworkに送信
+          curl -X POST \
+            -H "X-ChatWorkToken: ${CHATWORK_API_TOKEN}" \
+            -d "body=${MESSAGE}" \
+            "https://api.chatwork.com/v2/rooms/${CHATWORK_ROOM_ID}/messages"
 
       - name: Upload Trivy scan reports as artifacts
         uses: actions/upload-artifact@v4
